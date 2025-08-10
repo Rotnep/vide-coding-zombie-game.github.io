@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Top-down Zombie Shooter</title>
+  <style>
+    :root{--bg:#0b1020;--player:#66d9ef;--zombie:#9f4d4d;--bullet:#ffd166;--ui:#e6eef8}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, Arial;background:linear-gradient(180deg,var(--bg),#071027);color:var(--ui)}
+    #game-wrap{display:flex;gap:12px;align-items:flex-start;padding:18px}
+    canvas{background:#071124;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.6)}
+    .panel{width:260px}
+    h1{font-size:18px;margin:0 0 8px}
+    .stats{background:rgba(255,255,255,0.03);padding:12px;border-radius:8px}
+    .btn{display:inline-block;padding:8px 12px;margin-top:8px;background:#1b263b;border-radius:8px;color:var(--ui);cursor:pointer;border:1px solid rgba(255,255,255,0.03)}
+    .small{font-size:13px;color:rgba(230,238,248,0.85)}
+    .hud{position:absolute;left:18px;top:18px;color:var(--ui)}
+    .hp-bar{height:12px;background:rgba(255,255,255,0.08);border-radius:8px;overflow:hidden}
+    .hp-fill{height:100%;background:linear-gradient(90deg,#ff6b6b,#ffb86b);width:100%}
+    footer{margin-top:14px;font-size:12px;color:rgba(230,238,248,0.6)}
+    .credits{font-size:12px;color:rgba(230,238,248,0.6);margin-top:8px}
+  </style>
+</head>
+<body>
+  <div id="game-wrap">
+    <div style="position:relative">
+      <canvas id="game" width="900" height="600"></canvas>
+      <div class="hud" id="hud" style="pointer-events:none">
+        <div style="width:260px">
+          <div class="small">Player HP</div>
+          <div class="hp-bar" style="margin-top:6px"><div id="hpFill" class="hp-fill"></div></div>
+          <div style="margin-top:6px" class="small">Zombies: <span id="zcount">0</span> · Score: <span id="score">0</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h1>Top-down Zombie Shooter</h1>
+      <div class="stats">
+        <div><strong>Controls</strong></div>
+        <div class="small" style="margin-top:6px">W/A/S/D — move. Move toward mouse to aim.</div>
+        <div class="small">Left click — shoot</div>
+        <div style="margin-top:10px"><strong>Rules</strong></div>
+        <ul class="small">
+          <li>Player starts with 100 HP</li>
+          <li>Each zombie hit by a bullet loses 1 HP</li>
+          <li>Zombies have 3 HP</li>
+          <li>When a zombie touches player it deals 1 HP (with brief cooldown)</li>
+        </ul>
+        <button id="startBtn" class="btn">Start / Restart</button>
+        <div class="credits">Built as a single-file demo. Ask to tweak speed, spawn rate, or mechanics.</div>
+      </div>
+      <footer>
+        <div class="small">Authoritative, experimental implementation — precise mechanics encoded as requested.</div>
+      </footer>
+    </div>
+  </div>
+
+  <script>
+  // Scientific-style, precise implementation of the requested mechanics.
+  // Entities: Player (100 HP), Zombies (3 HP), Bullets (1 damage to zombie), WASD movement, left-click to shoot.
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const startBtn = document.getElementById('startBtn');
+  const zcountEl = document.getElementById('zcount');
+  const scoreEl = document.getElementById('score');
+  const hpFill = document.getElementById('hpFill');
+
+  const W = canvas.width, H = canvas.height;
+
+  let keys = {w:false,a:false,s:false,d:false};
+  let mouse = {x:W/2,y:H/2,down:false};
+
+  class Player{
+    constructor(x,y){
+      this.x = x; this.y = y;
+      this.radius = 14;
+      this.hp = 100;
+      this.speed = 220; // pixels per second
+      this.fireRate = 6; // bullets per second
+      this._lastShot = 0;
+    }
+    update(dt){
+      let dx = 0, dy = 0;
+      if(keys.w) dy -= 1; if(keys.s) dy += 1; if(keys.a) dx -= 1; if(keys.d) dx += 1;
+      if(dx!==0 || dy!==0){
+        const len = Math.hypot(dx,dy);
+        dx /= len; dy /= len;
+        this.x += dx * this.speed * dt;
+        this.y += dy * this.speed * dt;
+        this.x = Math.max(this.radius, Math.min(W-this.radius, this.x));
+        this.y = Math.max(this.radius, Math.min(H-this.radius, this.y));
+      }
+      // shooting
+      if(mouse.down){
+        const now = performance.now()/1000;
+        if(now - this._lastShot >= 1/this.fireRate){
+          this._lastShot = now;
+          const ang = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+          bullets.push(new Bullet(this.x + Math.cos(ang)*this.radius, this.y + Math.sin(ang)*this.radius, ang));
+        }
+      }
+    }
+    draw(ctx){
+      // player body
+      ctx.save();
+      ctx.translate(this.x,this.y);
+      ctx.beginPath(); ctx.arc(0,0,this.radius,0,Math.PI*2); ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--player') || '#66d9ef'; ctx.fill();
+      // gun direction
+      const ang = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+      ctx.rotate(ang);
+      ctx.fillStyle = '#123';
+      ctx.fillRect(this.radius-2,-5,12,10);
+      ctx.restore();
+    }
+  }
+
+  class Bullet{
+    constructor(x,y,ang){
+      this.x = x; this.y = y; this.vx = Math.cos(ang)*800; this.vy = Math.sin(ang)*800; this.radius = 4; this.life = 1.2; this.damage = 1;
+    }
+    update(dt){
+      this.x += this.vx*dt; this.y += this.vy*dt; this.life -= dt;
+    }
+    draw(ctx){
+      ctx.beginPath(); ctx.arc(this.x,this.y,this.radius,0,Math.PI*2); ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bullet') || '#ffd166'; ctx.fill();
+    }
+  }
+
+  class Zombie{
+    constructor(x,y){
+      this.x = x; this.y = y; this.radius = 16; this.speed = 70 + Math.random()*30; this.hp = 3; this.lastDamageTime = 0; // for contact damage cooldown
+    }
+    update(dt){
+      const dx = player.x - this.x, dy = player.y - this.y;
+      const dist = Math.hypot(dx,dy);
+      if(dist > 0.5){
+        this.x += (dx/dist) * this.speed * dt;
+        this.y += (dy/dist) * this.speed * dt;
+      }
+    }
+    draw(ctx){
+      ctx.save(); ctx.translate(this.x,this.y);
+      // body
+      ctx.beginPath(); ctx.arc(0,0,this.radius,0,Math.PI*2); ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--zombie') || '#9f4d4d'; ctx.fill();
+      // eyes
+      ctx.fillStyle = '#111'; ctx.fillRect(-6,-4,4,4); ctx.fillRect(2,-4,4,4);
+      // health bar
+      const w = this.radius*2; ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(-this.radius, -this.radius-8, w, 5);
+      ctx.fillStyle = '#76c893'; ctx.fillRect(-this.radius, -this.radius-8, w * (this.hp/3), 5);
+      ctx.restore();
+    }
+  }
+
+  let player, bullets, zombies, lastSpawn, score, running;
+
+  function spawnZombie(){
+    // spawn at random edge
+    const edge = Math.floor(Math.random()*4);
+    let x,y;
+    if(edge===0){ x = -20; y = Math.random()*H; }
+    if(edge===1){ x = W+20; y = Math.random()*H; }
+    if(edge===2){ x = Math.random()*W; y = -20; }
+    if(edge===3){ x = Math.random()*W; y = H+20; }
+    zombies.push(new Zombie(x,y));
+  }
+
+  function startGame(){
+    player = new Player(W/2,H/2);
+    bullets = [];
+    zombies = [];
+    lastSpawn = 0;
+    score = 0;
+    running = true;
+    zcountEl.textContent = '0'; scoreEl.textContent = '0';
+  }
+
+  // physics and loop
+  let lastTime = performance.now();
+  function loop(now){
+    const nowS = now/1000;
+    let dt = (now - lastTime)/1000; if(dt>0.05) dt = 0.05; lastTime = now;
+    if(running){
+      // spawn control: spawn faster as time goes on
+      lastSpawn += dt;
+      if(lastSpawn > Math.max(0.6, 2 - Math.floor(score/10)*0.1)){
+        spawnZombie(); lastSpawn = 0;
+      }
+
+      player.update(dt);
+      bullets.forEach(b => b.update(dt));
+      zombies.forEach(z => z.update(dt));
+
+      // collisions: bullet -> zombie
+      for(let i = bullets.length-1; i>=0; i--){
+        const b = bullets[i];
+        // remove if out of bounds or dead
+        if(b.life <= 0 || b.x < -30 || b.x > W+30 || b.y < -30 || b.y > H+30){ bullets.splice(i,1); continue; }
+        for(let j = zombies.length-1; j>=0; j--){
+          const z = zombies[j];
+          const dx = b.x - z.x, dy = b.y - z.y;
+          if(dx*dx + dy*dy <= (b.radius+z.radius)*(b.radius+z.radius)){
+            z.hp -= b.damage;
+            bullets.splice(i,1);
+            if(z.hp <= 0){ zombies.splice(j,1); score += 1; scoreEl.textContent = score; }
+            break;
+          }
+        }
+      }
+
+      // collisions: zombie -> player (contact damage with cooldown per zombie)
+      const nowT = performance.now();
+      for(let i = zombies.length-1; i>=0; i--){
+        const z = zombies[i];
+        const dx = z.x - player.x, dy = z.y - player.y;
+        const dist2 = dx*dx + dy*dy;
+        const minDist = z.radius + player.radius;
+        if(dist2 <= minDist*minDist){
+          // if last damage by this zombie was more than 500ms ago, apply damage
+          if(nowT - z.lastDamageTime >= 500){
+            player.hp = Math.max(0, player.hp - 1);
+            z.lastDamageTime = nowT;
+            // optional: knockback a bit
+            const d = Math.sqrt(dist2) || 0.001;
+            const nx = dx/d, ny = dy/d;
+            z.x += nx * 8; z.y += ny * 8;
+            // update hp UI
+            hpFill.style.width = (player.hp/100*100) + '%';
+            if(player.hp <= 0){ running = false; }
+          }
+        }
+      }
+
+      // remove offscreen zombies (keep them)
+
+      zcountEl.textContent = zombies.length;
+
+      // draw
+      ctx.clearRect(0,0,W,H);
+      // grid for reference
+      drawBackground();
+      bullets.forEach(b => b.draw(ctx));
+      zombies.forEach(z => z.draw(ctx));
+      player.draw(ctx);
+
+      // game over overlay
+      if(!running){
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,W,H);
+        ctx.fillStyle = '#fff'; ctx.font = '32px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Game Over', W/2, H/2 - 10);
+        ctx.font = '16px sans-serif'; ctx.fillText('Press Start / Restart to play again', W/2, H/2 + 20);
+      }
+    } else {
+      // paused or not started: draw background and message
+      ctx.clearRect(0,0,W,H);
+      drawBackground();
+      ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(30,30,W-60,H-60);
+      ctx.fillStyle = '#fff'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Click Start / Restart to begin', W/2, H/2);
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  function drawBackground(){
+    // subtle vignette/grid
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    for(let x=0;x<W;x+=48){ ctx.fillRect(x,0,1,H); }
+    for(let y=0;y<H;y+=48){ ctx.fillRect(0,y,W,1); }
+    ctx.restore();
+  }
+
+  // input handling
+  window.addEventListener('keydown', e => {
+    if(e.key==='w' || e.key==='W' || e.key==='ArrowUp') keys.w = true;
+    if(e.key==='s' || e.key==='S' || e.key==='ArrowDown') keys.s = true;
+    if(e.key==='a' || e.key==='A' || e.key==='ArrowLeft') keys.a = true;
+    if(e.key==='d' || e.key==='D' || e.key==='ArrowRight') keys.d = true;
+  });
+  window.addEventListener('keyup', e => {
+    if(e.key==='w' || e.key==='W' || e.key==='ArrowUp') keys.w = false;
+    if(e.key==='s' || e.key==='S' || e.key==='ArrowDown') keys.s = false;
+    if(e.key==='a' || e.key==='A' || e.key==='ArrowLeft') keys.a = false;
+    if(e.key==='d' || e.key==='D' || e.key==='ArrowRight') keys.d = false;
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (canvas.width/rect.width);
+    mouse.y = (e.clientY - rect.top) * (canvas.height/rect.height);
+  });
+  canvas.addEventListener('mousedown', e => { if(e.button===0){ mouse.down = true; } });
+  window.addEventListener('mouseup', e => { if(e.button===0){ mouse.down = false; } });
+
+  startBtn.addEventListener('click', () => { startGame(); hpFill.style.width = '100%'; lastTime = performance.now(); });
+
+  // initialize in idle state
+  running = false;
+  player = new Player(W/2,H/2);
+  bullets = [];
+  zombies = [];
+  hpFill.style.width = '100%';
+  requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
